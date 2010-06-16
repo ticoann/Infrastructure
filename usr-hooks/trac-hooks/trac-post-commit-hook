@@ -100,6 +100,8 @@ parser.add_option('-s', '--siteurl', dest='url',
 
 (options, args) = parser.parse_args(sys.argv[1:])
 
+print options, args
+
 if not 'PYTHON_EGG_CACHE' in os.environ:
     os.environ['PYTHON_EGG_CACHE'] = os.path.join(options.project, '.egg-cache')
 
