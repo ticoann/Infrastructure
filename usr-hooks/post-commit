@@ -1,0 +1,7 @@
+#!/bin/sh
+REPOS="$1"
+REV="$2"
+TRAC_ENV="/trac/CMSDMWM"
+#/usr/bin/svn-mailer commit "$REPOS" "$REV" /afs/cern.ch/project/svn/reps/CMSDMWM/conf/svn-mailer.conf
+/usr/bin/python /afs/cern.ch/project/svn/reps/CMSDMWM/usr-hooks/svn-hooks/mailer.py commit "$REPOS" "$REV" /afs/cern.ch/project/svn/reps/CMSDMWM/conf/mailer.conf
+/usr/bin/python /afs/cern.ch/project/svn/reps/CMSDMWM/usr-hooks/trac-hooks/trac-post-commit-hook  -p "$TRAC_ENV" -r "$REV" >> /afs/cern.ch/user/l/libcmsdm/logs/trac_hook.log

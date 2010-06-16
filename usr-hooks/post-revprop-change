@@ -1,0 +1,10 @@
+#!/bin/sh
+
+REPOS="$1"
+REV="$2"
+USER="$3"
+PROPNAME="$4"
+ACTION="$5"
+
+/usr/bin/svn-mailer --propchange --config /afs/cern.ch/project/svn/reps/CMSDMWM/conf/svn-mailer.conf --repository "${REPOS}" --revision "${REV}" --author "${USER}" --propname "${PROPNAME}" --action "${ACTION}" &
+/usr/bin/python /afs/cern.ch/project/svn/reps/CMSDMWM/hooks/svn-hooks/mailer.py propchange2 "$REPOS" "$REV" "${USER}" "${PROPNAME}" "${ACTION}" /afs/cern.ch/project/svn/reps/CMSDMWM/conf/mailer.conf

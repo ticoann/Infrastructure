@@ -1,0 +1,15 @@
+#!/bin/sh
+REPOS="$1"
+TXN="$2"
+CASE=/afs/cern.ch/project/svn/reps/CMSDMWM/usr-hooks/svn-hooks/case-insensitive.py
+DETECT=/afs/cern.ch/project/svn/reps/CMSDMWM/usr-hooks/svn-hooks/detect-merge-conflicts.sh
+POLICE=/afs/cern.ch/project/svn/reps/CMSDMWM/usr-hooks/svn-hooks/log-police.py
+#check case to avoid conflict Windows-Linux
+$CASE "$REPOS" "$TXN" || exit 1
+#check if there exist unsolved conflicts
+$DETECT "$REPOS" "$TXN" || exit 2
+#Ensures that the log message ends in newline
+$POLICE -t "$TXN" "$REPOS" || exit 3
+
+# All checks passed, so allow the commit.
+exit 0
