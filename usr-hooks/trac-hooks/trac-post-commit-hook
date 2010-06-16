@@ -201,6 +201,7 @@ class CommitHook:
 
 
 if __name__ == "__main__":
+    print 'Hello from the trac post commit hook'
     if len(sys.argv) < 5:
         print "For usage: %s --help" % (sys.argv[0])
         print
