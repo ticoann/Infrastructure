@@ -4,7 +4,11 @@ REV="$2"
 TRAC_ENV="/trac/CMSDMWM"
 
 echo "triggered post commit hooks for " $REV " in " $REPOS  >> /afs/cern.ch/user/l/libcmsdm/logs/post_commit_hook.log
-#/usr/bin/svn-mailer commit "$REPOS" "$REV" /afs/cern.ch/project/svn/reps/CMSDMWM/conf/svn-mailer.conf
+
+# Email notifications
 /usr/bin/python /afs/cern.ch/project/svn/reps/CMSDMWM/usr-hooks/svn-hooks/mailer.py commit "$REPOS" "$REV" /afs/cern.ch/project/svn/reps/CMSDMWM/conf/mailer.conf
+
+#ÊCheck commit message and update Trac as appropriate 
 /usr/bin/python /afs/cern.ch/project/svn/reps/CMSDMWM/usr-hooks/trac-hooks/trac-post-commit-hook  -p "$TRAC_ENV" -r "$REV" >> /afs/cern.ch/user/l/libcmsdm/logs/post_commit_hook.log
+
 echo "post commit hooks done for " $REV " in " $REPOS >> /afs/cern.ch/user/l/libcmsdm/logs/post_commit_hook.log
