@@ -10,9 +10,45 @@ import logging
 import subprocess
 import base64
 import os
+import urllib2
 
 from urlparse import urlparse, urlunparse
 from optparse import OptionParser
+
+class HTTPSDigestTransport(xmlrpclib.SafeTransport):
+    """
+    Transport that uses urllib2 so that we can do Digest authentication.
+    
+    Based upon code at http://bytes.com/topic/python/answers/509382-solution-xml-rpc-over-proxy
+    """
+
+    def __init__(self, username, pw, realm, verbose = None, use_datetime=0):
+        self.__username = username
+        self.__pw = pw
+        self.__realm = realm
+        self.verbose = verbose
+        self._use_datetime = use_datetime
+
+    def request(self, host, handler, request_body, verbose):
+        url='https://'+host+handler
+        if verbose or self.verbose:
+            print "ProxyTransport URL: [%s]"%url
+
+        request = urllib2.Request(url)
+        request.add_data(request_body)
+        # Note: 'Host' and 'Content-Length' are added automatically
+        request.add_header("User-Agent", self.user_agent)
+        request.add_header("Content-Type", "text/xml") # Important
+
+        # setup digest authentication
+        authhandler = urllib2.HTTPBasicAuthHandler()
+        authhandler.add_password(self.__realm, url, self.__username, self.__pw)
+        opener = urllib2.build_opener(authhandler)
+
+        #proxy_handler=urllib2.ProxyHandler()
+        #opener=urllib2.build_opener(proxy_handler)
+        f=opener.open(request)
+        return(self.parse_response(f))
 
 def do_options():
     op = OptionParser()
@@ -56,6 +92,11 @@ def do_options():
               action="store_false",
               default=True, 
               help="Don't clean up the tarball and patchset, over ridden by --debug.")
+    
+    op.add_option("--realm",
+              dest="realm",
+              default="Subversion at CERN",
+              help="The HTTP digest realm")
               
     options, args = op.parse_args()
     
@@ -131,10 +172,12 @@ if __name__ == "__main__":
   options, patches, logger = do_options()
   options.password = getpass.getpass()
 
-  url_pieces = urlparse(options.server)
-  url = '%s://%s:%s@%s%s' % (url_pieces.scheme, options.username, options.password, url_pieces.netloc, url_pieces.path)
+  digestTransport = HTTPSDigestTransport(options.username, 
+                                         options.password, 
+                                         options.realm)
   
-  server = xmlrpclib.ServerProxy(url)
+  server = xmlrpclib.ServerProxy(options.server, transport=digestTransport)
+
   filename, tarball = build_patchset(patches, options.username, logger)
   
   if options.ticket:
