@@ -180,9 +180,15 @@ def build_patchset_message(patches):
   """
   Build an appropriate message from stg messages
   """
-  msg_cmd = "stg series -a -d|grep -ve '^-'|awk -F \# '{print$2}'"
+  msg_cmd = "stg series -a -d|grep -ve '^-'"
   stdout, stderr, rc = run(msg_cmd, logger)
-  return stdout
+  lines = stdout.strip().split('\n')
+  message = []
+  msg_app = message.append
+
+  for l in lines:
+    msg_app(l.split('#', 1)[1])
+  return "\n".join(message)
 
 if __name__ == "__main__":
   options, patches, logger = do_options()
