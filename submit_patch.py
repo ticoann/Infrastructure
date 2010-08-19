@@ -102,7 +102,7 @@ def do_options():
     op.add_option("--realm",
               dest="realm",
               default="Subversion at CERN",
-              help="The HTTP basic realm")
+              help="The HTTP auth realm")
               
     options, args = op.parse_args()
     
@@ -204,9 +204,10 @@ if __name__ == "__main__":
   if options.all:
     # over write patches with everything in the series
     patches = list_patchset_contents()
+  logger.debug('Patchset contents:\n %s' % '\n\t'.join(patches))
   if options.message == "":
     options.message = build_patchset_message(patches)
-  
+  logger.debug('Submitting patchset with the following message:\n %s' % options.message)
   basicTransport = HTTPSBasicTransport(options.username, 
                                          options.password, 
                                          options.realm)
@@ -215,15 +216,19 @@ if __name__ == "__main__":
 
   filename = build_patchset(patches, options.username, logger)
   
-  if options.ticket:
-    assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
-    ticket_id = int(options.ticket)
-    server.ticket.putAttachment(ticket_id, 
-                                filename,
-                                options.message, 
-                                xmlrpclib.Binary(open(filename).read()))
-  else: 
-    logger.info("creating new ticket")
+  if not options.ticket:
+    logger.info("Creating new ticket")
+    options.ticket = server.ticket.create(options.summary, options.message)
+    print options.ticket
+    raise
+  logger.debug("Attaching patch to ticket")  
+  assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
+  ticket_id = int(options.ticket)
+  server.ticket.putAttachment(ticket_id, 
+                              filename,
+                              options.message, 
+                              xmlrpclib.Binary(open(filename).read()))
+  
     
   if options.clean and not options.debug:
       clean_patchset(options.username)
