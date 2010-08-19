@@ -117,17 +117,15 @@ def do_options():
     
     return options, args, logger
     
-def run(command, logger):
+def run(command):
     proc = subprocess.Popen(
-            ["/bin/bash"], shell=True, cwd=os.environ['PWD'],
+            [command], shell=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE
             )
-
-    proc.stdin.write(command)
     stdout, stderr =  proc.communicate()
     rc = proc.returncode
+    return stdout, stderr, rc
 
     if rc != 0:
         logger.warning("failure to run %s" % command)
@@ -145,11 +143,11 @@ def build_patchset(patches, user, logger):
   
   stg_cmd = "stg export -d %s -p -n %s" % (patchseries, " ".join(patches))
   logger.debug(stg_cmd)
-  run(stg_cmd, logger)
+  assert run(stg_cmd, logger)[2] == 0, '%s failed - check debug output' % stg_cmd
   
   tar_cmd = "tar -zcf %s %s" % (filename, patchseries)
   logger.debug(tar_cmd)
-  run(tar_cmd, logger)
+  assert run(tar_cmd, logger)[2] == 0, '%s failed - check debug output' % tar_cmd
   
   initial_data = open(filename, 'rt').read()
 
