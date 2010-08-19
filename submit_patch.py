@@ -81,6 +81,12 @@ def do_options():
     op.add_option("-t", "--ticket",
               dest="ticket", 
               help="The id of the ticket")
+    
+    op.add_option("-a", "--all",
+              dest="all", 
+              action="store_true",
+              default=False, 
+              help="Build a patch set from all patches in the series.")
               
     op.add_option("--server",
               dest="server",
@@ -102,8 +108,8 @@ def do_options():
     
     logging.basicConfig(level=logging.WARNING)
     logger = logging.getLogger('submit_patch')
-    if args == []:
-      logger.critical("You must provide the names of one or more patches")
+    if args == [] and not options.all:
+      logger.critical("You must provide the names of one or more patches, or use the -a/--all flag.")
       sys.exit(101)
     if options.ticket == None and options.summary == None:
       logger.critical("You must provide a ticket id to update an exisitng ticket or a summary to create a new ticket")
@@ -117,7 +123,7 @@ def do_options():
     
     return options, args, logger
     
-def run(command):
+def run(command, logger):
     proc = subprocess.Popen(
             [command], shell=True,
             stdout=subprocess.PIPE,
@@ -161,11 +167,33 @@ def clean_patchset(user):
   clean_cmd = 'rm -rf %s %s' % patchset, filename
   
   assert run(clean_cmd, logger)[2] == 0, '%s failed - check debug output' % clean_cmd
-  
+
+def list_patchset_contents():
+  """
+  Build a list of all active patches
+  """
+  series_cmd = "stg series|grep -ve '^-'|awk '{print$2}'"
+  stdout, stderr, rc = run(series_cmd, logger)
+  return stdout.split()
+
+def build_patchset_message(patches):
+  """
+  Build an appropriate message from stg messages
+  """
+  msg_cmd = "stg series -a -d|grep -ve '^-'|awk -F \# '{print$2}'"
+  stdout, stderr, rc = run(msg_cmd, logger)
+  return stdout
+
 if __name__ == "__main__":
   options, patches, logger = do_options()
   options.password = getpass.getpass()
-
+  
+  if options.all:
+    # over write patches with everything in the series
+    patches = list_patchset_contents()
+  if options.message == "":
+    options.message = build_patchset_message(patches)
+  
   digestTransport = HTTPSDigestTransport(options.username, 
                                          options.password, 
                                          options.realm)
@@ -180,6 +208,7 @@ if __name__ == "__main__":
                                 filename,
                                 options.message, 
                                 xmlrpclib.Binary(open(filename).read()))
+    server.ticket.update(options.ticket, "Patch attached:\n%s" % options.message)
   else: 
     logger.info("creating new ticket")
     
