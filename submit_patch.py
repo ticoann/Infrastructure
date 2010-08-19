@@ -149,11 +149,7 @@ def build_patchset(patches, user, logger):
   logger.debug(tar_cmd)
   assert run(tar_cmd, logger)[2] == 0, '%s failed - check debug output' % tar_cmd
   
-  initial_data = open(filename, 'rt').read()
-
-  encoded_data = base64.b64encode(initial_data)
-
-  return filename, encoded_data
+  return filename
 
 def clean_patchset(user):
   """
@@ -176,7 +172,7 @@ if __name__ == "__main__":
   
   server = xmlrpclib.ServerProxy(options.server, transport=digestTransport)
 
-  filename, tarball = build_patchset(patches, options.username, logger)
+  filename = build_patchset(patches, options.username, logger)
   
   if options.ticket:
     assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
