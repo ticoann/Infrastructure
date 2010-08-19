@@ -209,7 +209,6 @@ if __name__ == "__main__":
                                 filename,
                                 options.message, 
                                 xmlrpclib.Binary(open(filename).read()))
-    server.ticket.update(ticket_id, "Patch attached:\n%s" % options.message)
   else: 
     logger.info("creating new ticket")
     
