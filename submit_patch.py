@@ -15,9 +15,9 @@ import urllib2
 from urlparse import urlparse, urlunparse
 from optparse import OptionParser
 
-class HTTPSDigestTransport(xmlrpclib.SafeTransport):
+class HTTPSBasicTransport(xmlrpclib.SafeTransport):
     """
-    Transport that uses urllib2 so that we can do Digest authentication.
+    Transport that uses urllib2 so that we can do Basic authentication.
     
     Based upon code at http://bytes.com/topic/python/answers/509382-solution-xml-rpc-over-proxy
     """
@@ -40,7 +40,7 @@ class HTTPSDigestTransport(xmlrpclib.SafeTransport):
         request.add_header("User-Agent", self.user_agent)
         request.add_header("Content-Type", "text/xml") # Important
 
-        # setup digest authentication
+        # setup basic authentication
         authhandler = urllib2.HTTPBasicAuthHandler()
         authhandler.add_password(self.__realm, url, self.__username, self.__pw)
         opener = urllib2.build_opener(authhandler)
@@ -102,7 +102,7 @@ def do_options():
     op.add_option("--realm",
               dest="realm",
               default="Subversion at CERN",
-              help="The HTTP digest realm")
+              help="The HTTP basic realm")
               
     options, args = op.parse_args()
     
@@ -172,22 +172,29 @@ def list_patchset_contents():
   """
   Build a list of all active patches
   """
-  series_cmd = "stg series|grep -ve '^-'|awk '{print$2}'"
+  series_cmd = "stg series"
   stdout, stderr, rc = run(series_cmd, logger)
-  return stdout.split()
+  lines = stdout.strip().split('\n')
+  patch_set = []
+  patch_set_app = patch_set.append
+  for l in lines:
+    if not l.startswith("-"):
+      patch_set_app(l.split()[1])
+  return patch_set
 
 def build_patchset_message(patches):
   """
   Build an appropriate message from stg messages
   """
-  msg_cmd = "stg series -a -d|grep -ve '^-'"
+  msg_cmd = "stg series -a -d"
   stdout, stderr, rc = run(msg_cmd, logger)
   lines = stdout.strip().split('\n')
   message = []
   msg_app = message.append
 
   for l in lines:
-    msg_app(l.split('#', 1)[1])
+    if not l.startswith("-"):
+      msg_app(l.split('#', 1)[1])
   return "\n".join(message)
 
 if __name__ == "__main__":
@@ -200,11 +207,11 @@ if __name__ == "__main__":
   if options.message == "":
     options.message = build_patchset_message(patches)
   
-  digestTransport = HTTPSDigestTransport(options.username, 
+  basicTransport = HTTPSBasicTransport(options.username, 
                                          options.password, 
                                          options.realm)
   
-  server = xmlrpclib.ServerProxy(options.server, transport=digestTransport)
+  server = xmlrpclib.ServerProxy(options.server, transport=basicTransport)
 
   filename = build_patchset(patches, options.username, logger)
   
