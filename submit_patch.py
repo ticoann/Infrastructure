@@ -40,7 +40,7 @@ def do_options():
               dest="debug", 
               action="store_true",
               default=False, 
-              help="Be extremely verbose - print debugging statements.")
+              help="Print debugging statements and keep tarball and patchset around.")
               
     op.add_option("-t", "--ticket",
               dest="ticket", 
@@ -50,6 +50,12 @@ def do_options():
               dest="server",
               default="https://svnweb.cern.ch/no_sso/trac/CMSDMWM/login/xmlrpc",
               help="The trac server to use")
+
+    op.add_option("--noclean",
+              dest="clean", 
+              action="store_false",
+              default=True, 
+              help="Don't clean up the tarball and patchset, over ridden by --debug.")
               
     options, args = op.parse_args()
     
@@ -109,6 +115,17 @@ def build_patchset(patches, user, logger):
   encoded_data = base64.b64encode(initial_data)
 
   return filename, encoded_data
+
+def clean_patchset(user):
+  """
+  Delete the tar ball and patchset directory.
+  """
+  patchset = "patch-series-%s" % (user)
+  filename = "patch-series-%s.tar.gz" % (user)
+  
+  clean_cmd = 'rm -rf %s %s' % patchset, filename
+  
+  assert run(clean_cmd, logger)[2] == 0, '%s failed - check debug output' % clean_cmd
   
 if __name__ == "__main__":
   options, patches, logger = do_options()
@@ -118,8 +135,9 @@ if __name__ == "__main__":
   url = '%s://%s:%s@%s%s' % (url_pieces.scheme, options.username, options.password, url_pieces.netloc, url_pieces.path)
   
   server = xmlrpclib.ServerProxy(url)
+  filename, tarball = build_patchset(patches, options.username, logger)
+  
   if options.ticket:
-    filename, tarball = build_patchset(patches, options.username, logger)
     assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
     server.ticket.putAttachment(options.ticket, 
                                 filename,
@@ -128,5 +146,5 @@ if __name__ == "__main__":
   else: 
     logger.info("creating new ticket")
     
-    
-    
+  if options.clean and not options.debug:
+      clean_patchset(options.username)
