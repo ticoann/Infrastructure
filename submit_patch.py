@@ -164,7 +164,7 @@ def clean_patchset(user):
   patchset = "patch-series-%s" % (user)
   filename = "patch-series-%s.tar.gz" % (user)
   
-  clean_cmd = 'rm -rf %s %s' % patchset, filename
+  clean_cmd = 'rm -rf %s %s' % (patchset, filename)
   
   assert run(clean_cmd, logger)[2] == 0, '%s failed - check debug output' % clean_cmd
 
@@ -204,11 +204,12 @@ if __name__ == "__main__":
   
   if options.ticket:
     assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
-    server.ticket.putAttachment(options.ticket, 
+    ticket_id = int(options.ticket)
+    server.ticket.putAttachment(ticket_id, 
                                 filename,
                                 options.message, 
                                 xmlrpclib.Binary(open(filename).read()))
-    server.ticket.update(options.ticket, "Patch attached:\n%s" % options.message)
+    server.ticket.update(ticket_id, "Patch attached:\n%s" % options.message)
   else: 
     logger.info("creating new ticket")
     
