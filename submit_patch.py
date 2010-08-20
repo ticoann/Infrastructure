@@ -123,11 +123,12 @@ def do_options():
     
     return options, args, logger
     
-def run(command, logger):
+def run(command, logger, cwd=None):
     proc = subprocess.Popen(
             [command], shell=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            cwd=cwd
             )
     stdout, stderr =  proc.communicate()
     rc = proc.returncode
@@ -139,7 +140,7 @@ def run(command, logger):
         logger.debug(stderr)
         sys.exit(rc)
 
-def build_patchset(patches, user, logger):
+def build_patchset(patches, user, logger, basedir):
   """
   Call stg and build up the necessary path/patchset tarball, return the name of
   the tar file and the tar as base64 encoded data. 
@@ -149,15 +150,15 @@ def build_patchset(patches, user, logger):
   
   stg_cmd = "stg export -d %s -p -n %s" % (patchseries, " ".join(patches))
   logger.debug(stg_cmd)
-  assert run(stg_cmd, logger)[2] == 0, '%s failed - check debug output' % stg_cmd
+  assert run(stg_cmd, logger, basedir)[2] == 0, '%s failed - check debug output' % stg_cmd
   
   tar_cmd = "tar -zcf %s %s" % (filename, patchseries)
   logger.debug(tar_cmd)
-  assert run(tar_cmd, logger)[2] == 0, '%s failed - check debug output' % tar_cmd
+  assert run(tar_cmd, logger, basedir)[2] == 0, '%s failed - check debug output' % tar_cmd
   
   return filename
 
-def clean_patchset(user):
+def clean_patchset(user, basedir):
   """
   Delete the tar ball and patchset directory.
   """
@@ -166,7 +167,7 @@ def clean_patchset(user):
   
   clean_cmd = 'rm -rf %s %s' % (patchset, filename)
   
-  assert run(clean_cmd, logger)[2] == 0, '%s failed - check debug output' % clean_cmd
+  assert run(clean_cmd, logger, basedir)[2] == 0, '%s failed - check debug output' % clean_cmd
 
 def list_patchset_contents():
   """
@@ -201,6 +202,13 @@ if __name__ == "__main__":
   options, patches, logger = do_options()
   options.password = getpass.getpass()
   
+  # Get the base directory for the git repository
+  basedir, err, rc = run("git rev-parse --show-toplevel", logger)
+  if rc != 0:
+    basedir = None
+  else:
+    basedir = basedir.strip()
+
   if options.all:
     # over write patches with everything in the series
     patches = list_patchset_contents()
@@ -214,7 +222,7 @@ if __name__ == "__main__":
   
   server = xmlrpclib.ServerProxy(options.server, transport=basicTransport)
 
-  filename = build_patchset(patches, options.username, logger)
+  filename = build_patchset(patches, options.username, logger, basedir)
   
   if not options.ticket:
     logger.info("Creating new ticket")
@@ -224,11 +232,14 @@ if __name__ == "__main__":
   logger.debug("Attaching patch to ticket")  
   assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
   ticket_id = int(options.ticket)
+  localFileName = filename
+  if basedir:
+    localFileName = basedir + "/" + localFileName
   server.ticket.putAttachment(ticket_id, 
                               filename,
                               options.message, 
-                              xmlrpclib.Binary(open(filename).read()))
+                              xmlrpclib.Binary(open(localFileName).read()))
   
     
   if options.clean and not options.debug:
-      clean_patchset(options.username)
+      clean_patchset(options.username, basedir)
