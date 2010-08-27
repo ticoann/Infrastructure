@@ -88,10 +88,14 @@ def do_options():
               default=False, 
               help="Build a patch set from all patches in the series.")
               
+    op.add_option("-r", "--reviewer",
+              dest="reviewer", 
+              help="Assing the ticket to REVIEWER")
+              
     op.add_option("--server",
               dest="server",
               default="https://svnweb.cern.ch/no_sso/trac/CMSDMWM/login/xmlrpc",
-              help="The trac server to use")
+              help="The trac server to use.")
 
     op.add_option("--noclean",
               dest="clean", 
@@ -103,7 +107,12 @@ def do_options():
               dest="realm",
               default="Subversion at CERN",
               help="The HTTP auth realm")
-              
+
+    op.add_option("--dryrun",
+              dest="dryrun",
+              action="store_true",
+              default=False, 
+              help="Do a dry run, build the patch set locally but don't send to trac.")              
     options, args = op.parse_args()
     
     logging.basicConfig(level=logging.WARNING)
@@ -195,12 +204,14 @@ def build_patchset_message(patches):
 
   for l in lines:
     if not l.startswith("-"):
-      msg_app(l.split('#', 1)[1])
+      patch, patch_message = l.split('#', 1)
+      patch = patch.split()[1]
+      if patch in patches:
+        msg_app(patch_message.strip())
   return "\n".join(message)
 
 if __name__ == "__main__":
   options, patches, logger = do_options()
-  options.password = getpass.getpass()
   
   # Get the base directory for the git repository
   basedir, err, rc = run("git rev-parse --show-toplevel", logger)
@@ -208,38 +219,47 @@ if __name__ == "__main__":
     basedir = None
   else:
     basedir = basedir.strip()
-
+  component = basedir.split('/')[-1]
+  logger.info('Guessing that the component is %s' % component)
   if options.all:
     # over write patches with everything in the series
     patches = list_patchset_contents()
-  logger.debug('Patchset contents:\n %s' % '\n\t'.join(patches))
+  logger.debug('Patchset contents:\n\t%s' % '\n\t'.join(patches))
+
   if options.message == "":
     options.message = build_patchset_message(patches)
-  logger.debug('Submitting patchset with the following message:\n %s' % options.message)
-  basicTransport = HTTPSBasicTransport(options.username, 
-                                         options.password, 
-                                         options.realm)
+  else:
+    options.message = '%s\n------------\n%s' % (build_patchset_message(patches), options.message)
+  logger.debug('Submitting patchset with the following message:\n%s' % options.message)
   
-  server = xmlrpclib.ServerProxy(options.server, transport=basicTransport)
-
-  filename = build_patchset(patches, options.username, logger, basedir)
+  if not options.dryrun:
+    options.password = getpass.getpass()
   
-  if not options.ticket:
-    logger.info("Creating new ticket")
-    options.ticket = server.ticket.create(options.summary, options.message)
-    print options.ticket
-    raise
-  logger.debug("Attaching patch to ticket")  
-  assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
-  ticket_id = int(options.ticket)
-  localFileName = filename
-  if basedir:
-    localFileName = basedir + "/" + localFileName
-  server.ticket.putAttachment(ticket_id, 
-                              filename,
-                              options.message, 
-                              xmlrpclib.Binary(open(localFileName).read()))
-  
+    basicTransport = HTTPSBasicTransport(options.username, 
+                                           options.password, 
+                                           options.realm)
     
+    server = xmlrpclib.ServerProxy(options.server, transport=basicTransport)
+  #['101', <DateTime '20100812T10:49:09' at d34440>, <DateTime '20100824T23:06:29' at d344b8>, {'status': 'closed', 'description': '', 'reporter': 'metson', 'cc': '', 'type': 'defect', 'component': 'SiteDB', 'summary': 'second egroup mailing test', 'priority': 'major', 'owner': 'metson', 'version': '', 'milestone': '', 'keywords': '', 'resolution': 'invalid'}]
+  
+    filename = build_patchset(patches, options.username, logger, basedir)
+    
+    if not options.ticket:
+      logger.info("Creating new ticket")
+      options.ticket = server.ticket.create(options.summary, options.message, {'component': component}, True)
+      logger.info("Created ticket #%s" % options.ticket)
+    logger.debug("Attaching patch to ticket")  
+    assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
+    ticket_id = int(options.ticket)
+    localFileName = filename
+    if basedir:
+      localFileName = basedir + "/" + localFileName
+    server.ticket.putAttachment(ticket_id, 
+                                filename,
+                                options.message, 
+                                xmlrpclib.Binary(open(localFileName).read()))
+    if options.reviewer:
+      server.ticket.update(ticket_id, 'Please Review', {'owner':options.reviewer, 'component': component}, True)
+      
   if options.clean and not options.debug:
       clean_patchset(options.username, basedir)
