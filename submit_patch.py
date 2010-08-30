@@ -210,16 +210,62 @@ def build_patchset_message(patches):
         msg_app(patch_message.strip())
   return "\n".join(message)
 
+def determine_git_basedir():
+  """
+  Attempts to work out the current basedir
+  """
+  # First get the git version
+  version_cmd = "git --version"
+  stdout, stderr, rc = run(version_cmd, logger)
+  tokens = stdout.strip().split()
+  version = 0
+  if len(tokens) == 3:
+    verParts = tokens[2].split(".")
+    version = int(verParts[0]) + int(verParts[1]) / 10.0
+  else:
+    return None
+
+  # Now use the correct magic depending on git version
+  basedir = None
+  if version >= 1.8:
+    # Plays nicely
+    baserev, err, rc = run("git rev-parse --show-toplevel", logger)
+    if rc == 0:
+      basedir = baserev.strip()
+  else:
+    # Plays in the mud
+    cwd = os.getcwd()
+    cdup, err, rc = run("git rev-parse --show-cdup", logger)
+    if rc == 0:
+      # Calculate how many directories to move up
+      cdup = cdup.strip().split("/")
+      def map_func(a):
+        if a == "..":
+          return 1
+        return 0
+      count = sum(map(map_func, cdup))
+
+      # Now strip this many entries from the cwd
+      if count > 0:
+        parts = cwd.split("/")
+        if parts[0] == "":
+          parts[0] = "/"
+        count = count * -1
+        basedir = os.path.join(*parts[0:count])
+      else:
+        basedir = cwd
+
+  # All done (hopefully)
+  return basedir
+
 if __name__ == "__main__":
   options, patches, logger = do_options()
   
   # Get the base directory for the git repository
-  basedir, err, rc = run("git rev-parse --show-toplevel", logger)
-  if rc != 0:
-    basedir = None
-  else:
-    basedir = basedir.strip()
-  component = basedir.split('/')[-1]
+  basedir = determine_git_basedir()
+  component = None
+  if basedir:
+    component = basedir.split('/')[-1]
   logger.info('Guessing that the component is %s' % component)
   if options.all:
     # over write patches with everything in the series
