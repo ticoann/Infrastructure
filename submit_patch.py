@@ -232,6 +232,9 @@ if __name__ == "__main__":
     options.message = '%s\n------------\n%s' % (build_patchset_message(patches), options.message)
   logger.debug('Submitting patchset with the following message:\n%s' % options.message)
   
+  
+  filename = build_patchset(patches, options.username, logger, basedir)
+
   if not options.dryrun:
     options.password = getpass.getpass()
   
@@ -241,12 +244,17 @@ if __name__ == "__main__":
     
     server = xmlrpclib.ServerProxy(options.server, transport=basicTransport)
   #['101', <DateTime '20100812T10:49:09' at d34440>, <DateTime '20100824T23:06:29' at d344b8>, {'status': 'closed', 'description': '', 'reporter': 'metson', 'cc': '', 'type': 'defect', 'component': 'SiteDB', 'summary': 'second egroup mailing test', 'priority': 'major', 'owner': 'metson', 'version': '', 'milestone': '', 'keywords': '', 'resolution': 'invalid'}]
-  
-    filename = build_patchset(patches, options.username, logger, basedir)
+
+    # Build ticket owner / reviewer
+    attributes = {}
+    if component:
+      attributes['component'] = component
+    if options.reviewer:
+      attributes['owner'] = options.reviewer
     
     if not options.ticket:
       logger.info("Creating new ticket")
-      options.ticket = server.ticket.create(options.summary, options.message, {'component': component}, True)
+      options.ticket = server.ticket.create(options.summary, options.message, attributes, True)
       logger.info("Created ticket #%s" % options.ticket)
     logger.debug("Attaching patch to ticket")  
     assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
@@ -259,7 +267,7 @@ if __name__ == "__main__":
                                 options.message, 
                                 xmlrpclib.Binary(open(localFileName).read()))
     if options.reviewer:
-      server.ticket.update(ticket_id, 'Please Review', {'owner':options.reviewer, 'component': component}, True)
+      server.ticket.update(ticket_id, 'Please Review', attributes, True)
       
   if options.clean and not options.debug:
       clean_patchset(options.username, basedir)
