@@ -90,7 +90,11 @@ def do_options():
               
     op.add_option("-r", "--reviewer",
               dest="reviewer", 
-              help="Assing the ticket to REVIEWER")
+              help="Assigning  the ticket to REVIEWER")
+              
+    op.add_option("-c", "--component",
+              dest="component", 
+              help="Assigning the ticket to COMPONENT")
               
     op.add_option("--server",
               dest="server",
@@ -192,6 +196,19 @@ def list_patchset_contents():
       patch_set_app(l.split()[1])
   return patch_set
 
+def determine_git_version():
+  # First get the git version
+  version_cmd = "git --version"
+  stdout, stderr, rc = run(version_cmd, logger)
+  tokens = stdout.strip().split()
+  version = 0
+  if len(tokens) == 3:
+    verParts = tokens[2].split(".")
+    version = int(verParts[0]) + int(verParts[1]) / 10.0
+    return version
+  else:
+    return None
+
 def build_patchset_message(patches):
   """
   Build an appropriate message from stg messages
@@ -204,30 +221,24 @@ def build_patchset_message(patches):
 
   for l in lines:
     if not l.startswith("-"):
-      patch, patch_message = l.split('#', 1)
+      if determine_git_version() >= 1.7:
+        patch, patch_message = l.split('#', 1)
+      else:
+        patch, patch_message = l.split('|', 1)
       patch = patch.split()[1]
       if patch in patches:
         msg_app(patch_message.strip())
   return "\n".join(message)
-
+  
 def determine_git_basedir():
   """
   Attempts to work out the current basedir
   """
-  # First get the git version
-  version_cmd = "git --version"
-  stdout, stderr, rc = run(version_cmd, logger)
-  tokens = stdout.strip().split()
-  version = 0
-  if len(tokens) == 3:
-    verParts = tokens[2].split(".")
-    version = int(verParts[0]) + int(verParts[1]) / 10.0
-  else:
-    return None
 
+  version = determine_git_version()
   # Now use the correct magic depending on git version
   basedir = None
-  if version >= 1.8:
+  if version >= 1.7:
     # Plays nicely
     baserev, err, rc = run("git rev-parse --show-toplevel", logger)
     if rc == 0:
@@ -265,7 +276,12 @@ if __name__ == "__main__":
   basedir = determine_git_basedir()
   component = None
   if basedir:
-    component = basedir.split('/')[-1]
+    if options.component:
+      component = options.component
+    else:
+      # Make an educated guess
+      component = basedir.split('/')[-1]
+
   logger.info('Guessing that the component is %s' % component)
   if options.all:
     # over write patches with everything in the series
