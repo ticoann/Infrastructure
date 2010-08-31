@@ -331,6 +331,11 @@ if __name__ == "__main__":
                                 xmlrpclib.Binary(open(localFileName).read()))
     if options.reviewer:
       server.ticket.update(ticket_id, 'Please Review', attributes, True)
-      
+    
+    print 'Patch %s successfully submitted to trac' % options.ticket
+  else:
+    print 'Dry run complete'
   if options.clean and not options.debug:
-      clean_patchset(options.username, basedir)
+    logger.info("Cleaning up temporary files")
+    clean_patchset(options.username, basedir)
+
