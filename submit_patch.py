@@ -198,17 +198,18 @@ def list_patchset_contents():
 
 def determine_git_version():
   # First get the git version
-  version_cmd = "git --version"
+  version_cmd = "stg --version"
   stdout, stderr, rc = run(version_cmd, logger)
-  tokens = stdout.strip().split()
-  version = 0
-  if len(tokens) == 3:
-    verParts = tokens[2].split(".")
-    version = int(verParts[0]) + int(verParts[1]) / 10.0
-    return version
-  else:
-    return None
-
+  lines = stdout.split('\n')
+  version = {}
+  for l in lines:
+    tokens = l.strip().split()
+    if len(tokens) == 3:
+      verParts = tokens[2].split(".")
+      version[tokens[0]] = int(verParts[0]) + int(verParts[1]) / 10.0
+      
+  return version
+  
 def build_patchset_message(patches):
   """
   Build an appropriate message from stg messages
@@ -221,7 +222,7 @@ def build_patchset_message(patches):
 
   for l in lines:
     if not l.startswith("-"):
-      if determine_git_version() >= 1.7:
+      if determine_git_version()['Stacked'] >= 1.5:
         patch, patch_message = l.split('#', 1)
       else:
         patch, patch_message = l.split('|', 1)
@@ -235,7 +236,7 @@ def determine_git_basedir():
   Attempts to work out the current basedir
   """
 
-  version = determine_git_version()
+  version = determine_git_version()['git']
   # Now use the correct magic depending on git version
   basedir = None
   if version >= 1.7:
