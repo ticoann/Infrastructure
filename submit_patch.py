@@ -222,7 +222,7 @@ def build_patchset_message(patches):
 
   for l in lines:
     if not l.startswith("-"):
-      if determine_git_version()['Stacked'] >= 1.5:
+      if determine_git_version()['Stacked'] >= 0.15:
         patch, patch_message = l.split('#', 1)
       else:
         patch, patch_message = l.split('|', 1)
