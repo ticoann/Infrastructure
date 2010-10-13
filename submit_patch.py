@@ -52,6 +52,19 @@ class HTTPSBasicTransport(xmlrpclib.SafeTransport):
 
 def do_options():
     op = OptionParser()
+    
+    op.add_option("-v", "--verbose",
+              dest="verbose", 
+              action="store_true",
+              default=False, 
+              help="Be more verbose")
+              
+    op.add_option("-d", "--debug",
+              dest="debug", 
+              action="store_true",
+              default=False, 
+              help="Print debugging statements and keep tarball and patchset around.")
+              
     op.add_option("-u", "--username",
               dest="username", 
               help="Your username, default is %s" % getpass.getuser(), 
@@ -65,18 +78,6 @@ def do_options():
               dest="message",
               default="",
               help="Your commit message.")
-    
-    op.add_option("-v", "--verbose",
-              dest="verbose", 
-              action="store_true",
-              default=False, 
-              help="Be more verbose")
-              
-    op.add_option("-d", "--debug",
-              dest="debug", 
-              action="store_true",
-              default=False, 
-              help="Print debugging statements and keep tarball and patchset around.")
               
     op.add_option("-t", "--ticket",
               dest="ticket", 
@@ -95,7 +96,11 @@ def do_options():
     op.add_option("-c", "--component",
               dest="component", 
               help="Assigning the ticket to COMPONENT")
-              
+
+    op.add_option("-e", "--milestone",
+              dest="milestone",
+              help="The ticket milestone.")
+                        
     op.add_option("--server",
               dest="server",
               default="https://svnweb.cern.ch/no_sso/trac/CMSDMWM/login/xmlrpc",
@@ -117,6 +122,8 @@ def do_options():
               action="store_true",
               default=False, 
               help="Do a dry run, build the patch set locally but don't send to trac.")              
+
+
     options, args = op.parse_args()
     
     logging.basicConfig(level=logging.WARNING)
@@ -314,6 +321,8 @@ if __name__ == "__main__":
       attributes['component'] = component
     if options.reviewer:
       attributes['owner'] = options.reviewer
+    if options.milestone:
+      attributes['milestone'] = options.milestone
     
     if not options.ticket:
       logger.info("Creating new ticket")
