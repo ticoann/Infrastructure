@@ -11,6 +11,10 @@ import subprocess
 import base64
 import os
 import urllib2
+import tarfile
+import tempfile
+import StringIO
+import glob
 
 from urlparse import urlparse, urlunparse
 from optparse import OptionParser
@@ -63,7 +67,7 @@ def do_options():
               dest="debug", 
               action="store_true",
               default=False, 
-              help="Print debugging statements and keep tarball and patchset around.")
+              help="Print debugging statements and keep a record of the patchset in /tmp")
               
     op.add_option("-u", "--username",
               dest="username", 
@@ -72,7 +76,7 @@ def do_options():
     
     op.add_option("-s", "--summary",
               dest="summary",
-              help="The summary for a new ticket - required if -t is not set.")
+              help="The summary for a new ticket - required if -t is not set")
     
     op.add_option("-m", "--message",
               dest="message",
@@ -87,11 +91,11 @@ def do_options():
               dest="all", 
               action="store_true",
               default=False, 
-              help="Build a patch set from all patches in the series.")
+              help="Build a patch set from all patches in the series")
               
     op.add_option("-r", "--reviewer",
               dest="reviewer", 
-              help="Assigning  the ticket to REVIEWER")
+              help="Assigning the ticket to REVIEWER")
               
     op.add_option("-c", "--component",
               dest="component", 
@@ -100,7 +104,18 @@ def do_options():
     op.add_option("-e", "--milestone",
               dest="milestone",
               help="The ticket milestone.")
-                        
+              
+    op.add_option("--mode",
+              dest="mode", type="choice",
+              default="tarball",
+              choices=("diff", "multidiff", "tarball"),
+              help="Attachment mode: diff, multidiff, tarball")
+              
+    op.add_option("-n", "--name",
+            dest="name",
+            default=None,
+            help="Append NAME to the name tarball or multidiff to create") 
+            
     op.add_option("--server",
               dest="server",
               default="https://svnweb.cern.ch/no_sso/trac/CMSDMWM/login/xmlrpc",
@@ -110,7 +125,7 @@ def do_options():
               dest="clean", 
               action="store_false",
               default=True, 
-              help="Don't clean up the tarball and patchset, over ridden by --debug.")
+              help="If set keep a record of the patchset in /tmp")
     
     op.add_option("--realm",
               dest="realm",
@@ -121,12 +136,17 @@ def do_options():
               dest="dryrun",
               action="store_true",
               default=False, 
-              help="Do a dry run, build the patch set locally but don't send to trac.")              
+              help="Do a dry run, build the patch set locally but don't send to trac")              
 
 
     options, args = op.parse_args()
     
-    logging.basicConfig(level=logging.WARNING)
+    log_level = logging.WARNING
+    if options.verbose:
+        log_level = logging.INFO
+    if options.debug:
+        log_level = logging.DEBUG
+    logging.basicConfig(level=log_level)
     logger = logging.getLogger('submit_patch')
     if args == [] and not options.all:
       logger.critical("You must provide the names of one or more patches, or use the -a/--all flag.")
@@ -134,217 +154,211 @@ def do_options():
     if options.ticket == None and options.summary == None:
       logger.critical("You must provide a ticket id to update an exisitng ticket or a summary to create a new ticket")
       sys.exit(102)
-    if options.verbose:
-        logger.setLevel(logging.INFO)
-    if options.debug:
-        logger.setLevel(logging.DEBUG)
 
     logger.info('options: %s, args: %s' % (options, args))
     
     return options, args, logger
     
-def run(command, logger, cwd=None):
-    proc = subprocess.Popen(
-            [command], shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=cwd
-            )
-    stdout, stderr =  proc.communicate()
-    rc = proc.returncode
-    return stdout, stderr, rc
+class GitInterface:
+    "Encapsulate all the stuff related to talking to git/stgit"
+    def __init__(self):
+        self.logger = logging.getLogger("GitInterface")
+        self.stg_version, self.git_version = self._version()
+        self.basedir = self._basedir()
+        
+    def _run(self, cmd, cwd=None):
+        "Use subprocess to run a command, and return the stdout. Raise an exception for returncode != 0."
+        proc = subprocess.Popen([cmd], shell=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                cwd=cwd)
+        stdout, stderr = proc.communicate()
+        rc = proc.returncode
+        if rc != 0:
+            self.logger.critical("Non-zero return code (%d) from command: %s",
+                                 rc, ' '.join(cmd))
+            self.logger.critical("STDOUT was: %s", stdout)
+            self.logger.critical("STDERR was: %s", stderr)
+            raise Exception("Subprocess Error")
 
-    if rc != 0:
-        logger.warning("failure to run %s" % command)
-        logger.debug(stdout)
-        logger.debug(stderr)
-        sys.exit(rc)
+        return stdout            
 
-def build_patchset(patches, user, logger, basedir):
-  """
-  Call stg and build up the necessary path/patchset tarball, return the name of
-  the tar file and the tar as base64 encoded data. 
-  """  
-  patchseries = "patch-series-%s" % (user)
-  filename = "patch-series-%s.tar.gz" % (user)
-  
-  stg_cmd = "stg export -d %s -p -n %s" % (patchseries, " ".join(patches))
-  logger.debug(stg_cmd)
-  assert run(stg_cmd, logger, basedir)[2] == 0, '%s failed - check debug output' % stg_cmd
-  
-  tar_cmd = "tar -zcf %s %s" % (filename, patchseries)
-  logger.debug(tar_cmd)
-  assert run(tar_cmd, logger, basedir)[2] == 0, '%s failed - check debug output' % tar_cmd
-  
-  return filename
+    def _version(self):
+        "Determine the versions of git and stgit in use"
+        git_v = (0,)
+        stg_v = (0,)
+        for line in self._run('stg -v').lower().split('\n'):
+            if 'stacked' in line:
+                for item in line.split():
+                    if '.' in item:
+                        stg_v = tuple(map(int, item.split('.')))
+                        self.logger.info("Found stgit version %s", stg_v)
+            elif 'git' in line:
+                for item in line.split():
+                    if '.' in item:
+                        git_v = tuple(map(int, item.split('.')))
+                        self.logger.info("Found git version %s", git_v)
 
-def clean_patchset(user, basedir):
-  """
-  Delete the tar ball and patchset directory.
-  """
-  patchset = "patch-series-%s" % (user)
-  filename = "patch-series-%s.tar.gz" % (user)
-  
-  clean_cmd = 'rm -rf %s %s' % (patchset, filename)
-  
-  assert run(clean_cmd, logger, basedir)[2] == 0, '%s failed - check debug output' % clean_cmd
+        return stg_v, git_v
 
-def list_patchset_contents():
-  """
-  Build a list of all active patches
-  """
-  series_cmd = "stg series"
-  stdout, stderr, rc = run(series_cmd, logger)
-  lines = stdout.strip().split('\n')
-  patch_set = []
-  patch_set_app = patch_set.append
-  for l in lines:
-    if not l.startswith("-"):
-      patch_set_app(l.split()[1])
-  return patch_set
+    def _basedir(self):
+        "Locate the base directory of the git repository. os.path is your friend."
+        if self.git_version >= (1,7):
+            basedir = self._run('git rev-parse --show-toplevel').strip()
+        else:
+            path_to = self._run('git rev-parse --show-cdup').strip()
+            basedir = os.path.abspath(path_to)
+        self.logger.debug("Found git basedir: %s", basedir)
+        return basedir
+        
+    def guess_component(self):
+        return self.basedir.split('/')[-1]
+        
+    def list_all_patches(self):
+        "List all the patches known to stg that are currently applied"
+        stdout = self._run('stg series')
+        return [line.split()[1] for line in stdout.strip().split('\n') if not line[0]=='-']
+        
+    def generate_message(self, patch_list):
+        "Generate a message by concating (with newlines) the short descriptions of the currently applied patches"
+        stdout = self._run('stg series -a -d')
+        separator = '|'
+        if self.stg_version >= (0,15):
+            separator = '#'
+        messages = [line.split(separator, 1)[-1] for line in stdout.strip().split('\n') if not line[0]=='-']
+        return '\n'.join(messages)
+        
+    def generate_plaintext(self, patch_list):
+        return self._run('stg export -s %s' % ' '.join(patch_list))
+        
+    def generate_tarball(self, patch_list, dirname):
+        tempdir = tempfile.mkdtemp()
+        self._run('stg export -d %s -p -n %s' % (tempdir, ' '.join(patches)))
+        tar_buffer = StringIO.StringIO()
+        tar_file = tarfile.open(name='tempfile',fileobj=tar_buffer, mode='w:gz')
+        tar_file.add(tempdir, arcname=dirname)
+        tar_file.close()
+        for f in glob.glob(tempdir +'/*'):
+            self.logger.debug('Removing %s from %s' % (f, tempdir))
+            os.remove(f)
+        os.rmdir(tempdir)
+        return tar_buffer.getvalue()
 
-def determine_git_version():
-  # First get the git version
-  version_cmd = "stg --version"
-  stdout, stderr, rc = run(version_cmd, logger)
-  lines = stdout.split('\n')
-  version = {}
-  for l in lines:
-    tokens = l.strip().split()
-    if len(tokens) == 3:
-      verParts = tokens[2].split(".")
-      version[tokens[0]] = int(verParts[0]) + int(verParts[1]) / 10.0
-      
-  return version
-  
-def build_patchset_message(patches):
-  """
-  Build an appropriate message from stg messages
-  """
-  msg_cmd = "stg series -a -d"
-  stdout, stderr, rc = run(msg_cmd, logger)
-  lines = stdout.strip().split('\n')
-  message = []
-  msg_app = message.append
 
-  for l in lines:
-    if not l.startswith("-"):
-      if determine_git_version()['Stacked'] >= 0.15:
-        patch, patch_message = l.split('#', 1)
-      else:
-        patch, patch_message = l.split('|', 1)
-      patch = patch.split()[1]
-      if patch in patches:
-        msg_app(patch_message.strip())
-  return "\n".join(message)
-  
-def determine_git_basedir():
-  """
-  Attempts to work out the current basedir
-  """
+if __name__ == '__main__':
+    options, patches, logger = do_options()
 
-  version = determine_git_version()['git']
-  # Now use the correct magic depending on git version
-  basedir = None
-  if version >= 1.7:
-    # Plays nicely
-    baserev, err, rc = run("git rev-parse --show-toplevel", logger)
-    if rc == 0:
-      basedir = baserev.strip()
-  else:
-    # Plays in the mud
-    cwd = os.getcwd()
-    cdup, err, rc = run("git rev-parse --show-cdup", logger)
-    if rc == 0:
-      # Calculate how many directories to move up
-      cdup = cdup.strip().split("/")
-      def map_func(a):
-        if a == "..":
-          return 1
-        return 0
-      count = sum(map(map_func, cdup))
+    gi = GitInterface()    
 
-      # Now strip this many entries from the cwd
-      if count > 0:
-        parts = cwd.split("/")
-        if parts[0] == "":
-          parts[0] = "/"
-        count = count * -1
-        basedir = os.path.join(*parts[0:count])
-      else:
-        basedir = cwd
-
-  # All done (hopefully)
-  return basedir
-
-if __name__ == "__main__":
-  options, patches, logger = do_options()
-  
-  # Get the base directory for the git repository
-  basedir = determine_git_basedir()
-  component = None
-  if basedir:
     if options.component:
-      component = options.component
+        component = options.component
     else:
-      # Make an educated guess
-      component = basedir.split('/')[-1]
+        component = gi.guess_component()
+        logger.info('Guessing that the component is %s' % component)
 
-  logger.info('Guessing that the component is %s' % component)
-  if options.all:
-    # over write patches with everything in the series
-    patches = list_patchset_contents()
-  logger.debug('Patchset contents:\n\t%s' % '\n\t'.join(patches))
-
-  if options.message == "":
-    options.message = build_patchset_message(patches)
-  else:
-    options.message = '%s\n------------\n%s' % (build_patchset_message(patches), options.message)
-  logger.debug('Submitting patchset with the following message:\n%s' % options.message)
-  
-  
-  filename = build_patchset(patches, options.username, logger, basedir)
-
-  if not options.dryrun:
-    options.password = getpass.getpass()
-  
-    basicTransport = HTTPSBasicTransport(options.username, 
-                                           options.password, 
-                                           options.realm)
+    # these are attributes associated to the ticket
+    attributes = {}   
+    logger.debug('Assigning ticket to component: %s' % options.component)
+    attributes['component'] = component
     
-    server = xmlrpclib.ServerProxy(options.server, transport=basicTransport)
-  #['101', <DateTime '20100812T10:49:09' at d34440>, <DateTime '20100824T23:06:29' at d344b8>, {'status': 'closed', 'description': '', 'reporter': 'metson', 'cc': '', 'type': 'defect', 'component': 'SiteDB', 'summary': 'second egroup mailing test', 'priority': 'major', 'owner': 'metson', 'version': '', 'milestone': '', 'keywords': '', 'resolution': 'invalid'}]
-
-    # Build ticket owner / reviewer
-    attributes = {}
-    if component:
-      attributes['component'] = component
+    if options.milestone: 
+        logger.debug('Assigning ticket to milestone: %s' % options.milestone)
+     	attributes['milestone'] = options.milestone
+     	
     if options.reviewer:
-      attributes['owner'] = options.reviewer
-    if options.milestone:
-      attributes['milestone'] = options.milestone
-    
-    if not options.ticket:
-      logger.info("Creating new ticket")
-      options.ticket = server.ticket.create(options.summary, options.message, attributes, True)
-      logger.info("Created ticket #%s" % options.ticket)
-    logger.debug("Attaching patch to ticket")  
-    assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
-    ticket_id = int(options.ticket)
-    localFileName = filename
-    if basedir:
-      localFileName = basedir + "/" + localFileName
-    server.ticket.putAttachment(ticket_id, 
-                                filename,
-                                options.message, 
-                                xmlrpclib.Binary(open(localFileName).read()))
-    if options.reviewer:
-      server.ticket.update(ticket_id, 'Please Review', attributes, True)
-    
-    print 'Patch %s successfully submitted to trac' % options.ticket
-  else:
-    print 'Dry run complete'
-  if options.clean and not options.debug:
-    logger.info("Cleaning up temporary files")
-    clean_patchset(options.username, basedir)
+        logger.debug('Assigning ticket to reviewer: %s' % options.reviewer)
+        attributes['owner'] = options.reviewer
 
+    all_patches = gi.list_all_patches()
+    
+    if options.all:
+        patches = all_patches
+    else:
+        for patch in patches:
+            if not patch in all_patches:
+                logger.error('Specified patch "%s" is not known to stgit', patch)
+        patches = filter(lambda x: x in all_patches, patches)
+        if not patches:
+            logger.critical('No patches remaining')
+            sys.exit(103)
+            
+    logger.info("Patchset contains:\n\t%s", "\n\t".join(patches))
+
+    if options.message:
+        message = options.message
+    else:
+        message = gi.generate_message(patches)
+        logger.debug('Generated message: %s', message)
+
+    uploads = {} #filename -> data
+
+    if options.mode == 'multidiff':
+        for i, patch in enumerate(patches):
+            name = '%02d-%s-%s.patch' % (i, options.username, patch)
+            uploads[name] = gi.generate_plaintext([patch])
+    else:
+        # set the base name for the patch
+        if options.name:
+            basename = '%s-%s' % (options.username, options.name)
+        else: 
+            basename = options.username
+        # set the full name for the patch
+        if options.mode == 'diff':
+            name = 'patch-series-%s.patch' % basename
+        elif options.mode == 'tarball':
+            name = 'patch-series-%s.tar.gz' % basename
+        
+        # generate the patch in memory    
+        if options.mode == 'diff':
+            uploads[name] = gi.generate_plaintext(patches)
+        elif options.mode == 'tarball':
+            uploads[name] = gi.generate_tarball(patches, name.split('.')[0])
+
+    if options.debug or not options.clean:
+        # keep a record of the patch in /tmp
+        for name, payload in uploads.items():
+            open('/tmp/%s'%name,'wb').write(payload)
+            if not options.clean:
+                logger.warning('The contents of your patch %s is available in /tmp' % uploads.keys())
+            else:
+                logger.debug('The contents of your patch %s is available in /tmp' % uploads.keys())
+
+    logger.debug("Upload list contains: %s", uploads.keys())
+
+    if not options.dryrun:
+        password = getpass.getpass()
+
+        transport = HTTPSBasicTransport(options.username, password, options.realm)
+        server = xmlrpclib.ServerProxy(options.server, transport=transport)
+
+        if not options.ticket:
+            logger.info("Creating new ticket")
+            options.ticket = server.ticket.create(options.summary, options.message, attributes, True)
+            logger.info("Created ticket #%s" % options.ticket)
+            
+        logger.debug("Attaching patch to ticket")  
+        assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
+        ticket_id = int(options.ticket)
+        for name, payload in uploads.items():
+            logger.info("Uploading attachment: %s", name)
+            server.ticket.putAttachment(ticket_id, 
+                                        name,
+                                        options.message, 
+                                        xmlrpclib.Binary(payload))
+            logger.info("...upload complete")
+        if options.reviewer or options.milestone:    
+            # Need to update the ticket
+            logger.debug("Updating ticket with reviewer/milestone information")
+            
+            if options.reviewer and options.milestone:
+                msg = 'Please include in the %s milestone\nPlease review' % options.milestone
+            elif options.reviewer:
+                msg = 'Please Review'
+            elif options.milestone:
+                msg = 'Please include in the %s milestone' % options.milestone
+
+            server.ticket.update(ticket_id, msg, attributes, True)
+
+        logger.info("Patch successfully submitted to ticket %s", options.ticket)    
+    else:
+        logger.warning("Dry run complete")
