@@ -6,17 +6,17 @@ visit() {
 
     if [[ $PKG_LIST =~ "^$PROJ | $PROJ$| $PROJ |^$PROJ$" ]]; then
         # This is one of the developer's project files. Get from his tag
-	cvs up -r $PTAG CMSDIST/$FILE
+	cvs -Q up -r $PTAG CMSDIST/$FILE
     elif [ -f $WEB/$PROJ.$REPO ]; then
 	# If it is another top-level project, get from latest release
 	local RELTAG=$(cat $WEB/$PROJ.$REPO|cut -d"|" -f6 | tr -d " \t")
-	cvs up -r $RELTAG CMSDIST/$FILE
+	cvs -Q up -r $RELTAG CMSDIST/$FILE
     elif [ -f CMSDIST.base/$FILE ]; then
-	# Tries to get from latest base release
-	cvs up -r $BTAG CMSDIST/$FILE
+	# Tries to get from the base release
+	cvs -Q up -r $BTAG CMSDIST/$FILE
     elif [ "$PTAG" != "HEAD" ]; then
 	# Since not possible by other means, get from developer's tag 
-	cvs up -r $PTAG CMSDIST/$FILE
+	cvs -Q up -r $PTAG CMSDIST/$FILE
     fi
 }
 
@@ -36,43 +36,41 @@ search() {
 #
 # Main
 #
-[ $# -lt 2 ] && echo "Usage: $0 <proj-cmsdist-tag> <project> [<other-pkgs> ...]" && exit 1
-[ -d "./CMSDIST" ] && echo "CMSDIST dir already exist" && exit 1
-[ -d "./CMSDIST.base" ] && echo "CMSDIST.base dir already exist" && exit 2
+[ $# -lt 3 ] && echo "Usage: $0 <base-tag> <proj-cmsdist-tag> <project> [<other-pkgs> ...]" && exit 1
+[ -d "./CMSDIST" ] && echo "CMSDIST dir already exists" && exit 1
+[ -d "./CMSDIST.base" ] && echo "CMSDIST.base dir already exists" && exit 2
 
-PTAG=$1; shift;
-PROJ=$1; shift;
+BTAG=$1; PTAG=$2; PROJ=$3; shift 3;
 PKG_LIST="$PROJ $@"
 
 CFGFILE="/build/diego/builder/sw/config"
 source $CFGFILE
 REPO="comp"
-BTAG=$(cat $WEB/base.$REPO|cut -d"|" -f6 | tr -d " \t")
 
-cvs co -d CMSDIST.base -r $BTAG CMSDIST
-cvs co -r $BTAG CMSDIST/cmsos.file CMSDIST/rpm-preamble.file CMSDIST/gcc.spec CMSDIST/binutils-2.19.1-fix-gold.patch
+cvs -Q co -d CMSDIST.base -r $BTAG CMSDIST ||
+    { echo "Could not fetch base tag $BTAG."; exit 3; }
+cvs -Q co -r $BTAG CMSDIST/cmsos.file CMSDIST/rpm-preamble.file CMSDIST/gcc.spec CMSDIST/binutils-2.19.1-fix-gold.patch
 
 search $PROJ
 
 # Exceptions: specs that require other files
-if [ -f CMSDIST/sqlite.spec ]; then
-	visit sqlite_`head -n1 CMSDIST/sqlite.spec | cut -d" " -f5`_readline_for_32bit_on_64bit_build.patch
-fi
+[ -f CMSDIST/sqlite.spec ] &&
+    visit sqlite_`head -n1 CMSDIST/sqlite.spec | cut -d" " -f5`_readline_for_32bit_on_64bit_build.patch
 
-if [ -f CMSDIST/oracle.spec ]; then
-        visit oracle-license.file
-fi
+[ -f CMSDIST/oracle.spec ] &&
+    visit oracle-license.file
 
-if [ -f CMSDIST/libjpg.spec ]; then
-	visit config.sub-amd64.file
-fi
+[ -f CMSDIST/libjpg.spec ] &&
+    visit config.sub-amd64.file
 
-if [ -f CMSDIST/mysql-deployment.spec ]; then
-	visit mysql-deployment.sh.file
-fi
+[ -f CMSDIST/mysql-deployment.spec ] &&
+    visit mysql-deployment.sh.file
+
+[ -f CMSDIST/couchdb.spec ] &&
+    visit couch_cms_auth.erl.file
 
 exit 0
-#
+
 # end of script
-#
+
 
