@@ -20,93 +20,184 @@ run_job() {
     MYCHLD+=" $!" # add the child pid to the children list
 }
 
+NAME='[.a-zA-Z0-9_\-]+'
+GLOB='([\*\{\}\?\^\!\.\,a-zA-Z0-9_\-]|\]?|\[?)+'
+BTAG='HG[0-9]{4}[a-zA-Z0-9]+'
+DELTA="[ \#]+\+ ?$NAME(\/$NAME|\/\*)?( $GLOB)+"
+NEWENTRY="(^|\#)$BTAG $NAME($DELTA)* *($|\#)"
+OLDENTRY="(^|\#)$NAME( $NAME)+ *($|\#)"
+
 job_process_file() {
     init_job
     local REPO=${1:-comp.pre}
     local FILE="${REPO/%comp/comp.}releases"
 
-    # Gets/updates the latest CMSDIST
+    echo "---------[$FILE]----------"
     cd $BUILDER_ROOT/var
-    cvs co -d CMSDIST.HEAD CMSDIST/$FILE ||
-        { echo "Could not fetch CMSDIST/$FILE. Skipping it."; exit 1; }
+    cvs co -d CMSDIST.HEAD CMSDIST ||
+        { echo "Could not fetch CMSDIST. Skipping it."; exit 1; }
 
-    # Now parses the CMSDIST.HEAD/$FILE
-    # Problems with a read in a while loop forced me to this parsing solution
-    local LINES=$(cat $BUILDER_ROOT/var/CMSDIST.HEAD/$FILE|tr -s '\t \n' '## ')
-    for LINE in $LINES; do
-	[ "${LINE:0:1}" = "#" ] && continue # skip commented out lines
-	if ! [[ $LINE =~ [^a-zA-Z0-9_\-\#] ]]; then
-	    # Means that the line contains only valid characters,
-	    # so we can use it safely.
-            echo "$FILE: ${LINE//#/ }"
-	    local DEVTAG=$(echo $LINE | cut -s -d"#" -f1)
-	    local PROJ=$(echo $LINE | cut -s -d"#" -f2) 
-	    local PROJ_LIST=$(echo $LINE | cut -s -d"#" -f2-|tr -s '#' ' ')
+    # Get rid of comment lines and changes newlines to # to avoid regex headaches
+    while read -d "#" ENTRY; do
+	echo " * Found entry <$ENTRY>"
+	run_job job_build $REPO $ENTRY
+    done <<< $(grep -v "#" CMSDIST.HEAD/$FILE | tr -s " \n" " #" | egrep -o "$NEWENTRY|$OLDENTRY" | tr "#\n" " #")
 
-	    if [ -z "$PROJ" -o -z "$DEVTAG" ]; then
-		echo "   Empty project name or dev tag. Skipping..."
-	    #elif [[ ! $ACCEPTED_PROJS =~ "^$PROJ | $PROJ$| $PROJ |^$PROJ$" ]]; then
-	    #    echo "PROCESS $REPO: $PROJ not in the accepted projects list"
-	    else
-		local LASTENTRY=$(cat $CACHE/$PROJ.$REPO.buildentry 2>/dev/null)
-		if [ "$LASTENTRY" = "$DEVTAG $PROJ_LIST" ]; then
-		    echo "   Build entry already processed. Skipping..."
-		else
-		    run_job job_build $DEVTAG $REPO $PROJ_LIST
-		    # wait % # the job_build result doesn't matter
-		    echo "   Build started. See $LOG_FILE.$PROJ.$REPO"
-		fi
-	    fi
-	fi
-    done
+    wait;
+    cat $LOG_FILE.*.$REPO.chk 2>/dev/null; echo;
+    rm -f $LOG_FILE.*.$REPO.chk
 
     exit 0 # job succeeded
 }
 
+# Returns 0 if needs rebuild; 1 otherwise
+process_delta() {
+    local CMSDIST=$1; shift;
+    local REBUILD=1
+
+    # Enables brace expansion (disabled by default when running scripts)
+    set -B 
+
+    # This loop process each delta
+    while [ "$1" = "+" ]; do
+	local REV=${2%%\/*}; local VER=${2#*\/}; shift 2
+	[ "$VER" = "$REV" ] && VER="*"
+	
+	[ "$REV" = "HEAD" -a "$VER" = "*" ] &&
+	    { echo "Malformed delta - you must specify version when using HEAD"; exit 1; }
+
+	# This loop process files affected by the delta
+	while [ "$1" != "+" -a -n "$1" ]; do
+	    # $1 is the glob pattern to look for files in CMSDIST HEAD
+	    # The 'eval echo' below is needed because brace expansion gets
+	    # done before variable expansion.
+	    for F in $(eval echo $BUILDER_ROOT/var/CMSDIST.HEAD/$1); do
+		local FNAME=${F##*/} # takes only the file name
+		echo "DEBUG: file is <$F>"
+		[ -f "$F" ] ||
+	            { echo "File pattern $FNAME could not be found in $BUILDER_ROOT/var/CMSDIST.HEAD/"; exit 1; }
+		if [ ! -f "$CMSDIST/$FNAME" ]; then 
+		    cvs co -r $REV -d $CMSDIST CMSDIST/$FNAME ||
+			{ echo "Error while getting CMSDIST/$FNAME from CVS"; exit 1; }
+		    REBUILD=0
+		fi
+		
+		local CURRVER=$(head -n1 $CMSDIST/$FNAME| tr -s " " | cut -d" " -f5 2>/dev/null)
+		if [ "$VER" != "*" -a "$CURRVER" != "$VER" ]; then
+		    cvs up -r $REV $CMSDIST/$FNAME ||
+			{ echo "Error while getting CMSDIST/$FNAME from CVS"; exit 1; }
+		    CURRVER=$(head -n1 $CMSDIST/$FNAME| tr -s " " | cut -d" " -f5 2>/dev/null)
+		    [ "$CURRVER" = "$VER" ] ||
+			{ echo "Could not get version $VER from $REV for $FNAME"; exit 1; }
+		    REBUILD=0
+		fi
+
+		local STAG=$(cvs status $CMSDIST/$FNAME |grep "Sticky Tag"| tr "\t" " " | cut -d" " -f7)
+		if [ "$VER" = "*" -a "$STAG" != "$REV" ]; then
+		    # revision will never be HEAD here
+		    cvs up -r $REV $CMSDIST/$FNAME ||
+			{ echo "Error while getting CMSDIST/$FNAME from CVS"; exit 1; }
+		    REBUILD=0
+		fi
+	    done
+	    shift
+	done
+    done
+    return $REBUILD
+}
+
 job_build() {
     init_job
-    local DEVTAG=$1; local REPO=$2; shift 2;
-    local PROJ_LIST="$@"; 
-    local PROJ=$(echo "$PROJ_LIST"|cut -d" " -f1); 
+    local REPO=$1; shift;
+    local CMSDIST="CMSDIST.$REPO"
+    local EFMT=0
+    
+    if [[ "$@" =~ "$NEWENTRY" ]]; then
+	# This is the new entry format (with deltas)
+	local BASETAG=$1; local PROJ=$2; shift 2;
+    else
+	# This is the old entry format (before accepting deltas)
+	local BASETAG="HG1009c"
+	[ "$1" = "$BASETAG" ] && shift;
+	local DEVTAG=$1; local PROJ=$2; shift 2;
+	local PROJ_LIST="$PROJ $@"; PROJ_LIST=${PROJ_LIST% }
+	[[ "$DEVTAG" =~ "builder_" ]] && EFMT=1 || EFMT=2
+    fi
 
-    exec &> $LOG_FILE.$PROJ.$REPO  # Set new log file
+    exec &> $LOG_FILE.$PROJ.$REPO.chk  # Set new log file
 
+    echo; echo "---------[$BASETAG $PROJ]----------"
+    mkdir -p $BUILDS/$PROJ; cd $BUILDS/$PROJ
     acquire_lock $PROJ ||
-       { echo "BUILD: project $PROJ locked by other process. Skipping."; exit 1; }
-
+	{ echo "Project $PROJ locked by other process. Skipping."; exit 1; }
     trap 'def_job_exit_trap; release_lock $PROJ' EXIT
 
-    cd $BUILDS/$PROJ
+    case $EFMT in
+      1 ) # old (comp only) entry format
+	[ "$REPO" = "comp" ] ||
+	    { echo "Entry syntax not allowed on pre-releases"; exit 1; }
+	if [ -d "$CMSDIST" ]; then
+	    cvs diff -N -r $DEVTAG $CMSDIST &&
+		{ echo "Nothing changed. Build not necessary"; exit 1; }
+	    cvs up -r $DEVTAG $CMSDIST ||
+		{ echo "Error while getting files from CVS"; exit 1; }
+	else
+	    cvs co -r $DEVTAG -d $CMSDIST CMSDIST ||
+		{ echo "Error while getting files from CVS"; exit 1; }
+	fi
+	;;
+      2 ) # old entry format
+	# Creates a CMSDIST based on the developer tag
+	rm -rf $CMSDIST.old CMSDIST.base
+	mv $CMSDIST $CMSDIST.old 2> /dev/null || mkdir $CMSDIST.old
+	run_job $TAGBUILDER $BASETAG $DEVTAG $PROJ_LIST
+	wait % || { echo "Could not prepare a tag for project $PROJ" ; exit 1; }
+	mv CMSDIST $CMSDIST
+	diff $CMSDIST $CMSDIST.old &&
+	   { echo "Nothing changed. Build not necessary"; exit 1; }
+	;;
+      * )
+	# This is new entry format
+	local REBUILD=1
+	if [ ! -d "$CMSDIST" ]; then
+	    cvs -Q co -r $BASETAG -d $CMSDIST CMSDIST ||
+		{ echo "Error while getting files from CVS"; exit 1; }
+	    REBUILD=0
+	elif [ "$(cat $CMSDIST/CVS/Tag |cut -b2-)" != "$BASETAG" ]; then
+	    #cvs -Q diff -N -r $BASETAG $CMSDIST || REBUILD=0
+	    cvs -Q up -r $BASETAG $CMSDIST || 
+		{ echo "Error while getting files from CVS"; exit 1; }
+	    REBUILD=0
+	fi
+	process_delta $CMSDIST $@ && REBUILD=0
+	[ $REBUILD = 0 ] ||
+	    { echo "Nothing changed. Build not necessary"; exit 1; };
+	;;
+    esac
 
-    # Now creates/fetches the CMSDIST
-    if [ "$REPO" = "comp" ]; then
-	cvs co -r $DEVTAG CMSDIST || 
-	{ echo "BUILD: failed to get cvs CMSDIST for $PROJ"; exit 2; }
-    else # REPO is comp.pre
-        # Creates a CMSDIST based on the developer tag
-	run_job $TAGBUILDER $DEVTAG $PROJ_LIST
-	wait % || { echo "BUILD: could not prepare a tag for project $PROJ" ; exit 2; }
-    fi
+    echo "Rebuilding project $PROJ. See logfile $LOG_FILE.$PROJ.$REPO"
+
+    exec &> $LOG_FILE.$PROJ.$REPO  # Set new log file
 
     # Creates a cmsBuild configuration file
     create_buildcfg $PROJ $REPO > cmsbuild.cfg
     
     # Builds it
-    run_job $CMSBUILD --architecture=$SCRAM_ARCH --cfg=./cmsbuild.cfg --work-dir=w
-    wait % || { echo "BUILD: project $PROJ failed to build."; exit 3; }
-    
-    update_status $REPO $PROJ ||
-       { echo "BUILD: project $PROJ produced no new RPMs. Skipping."; exit 3; }
+    [ -d "tmp" -o -d "w" ] && rm -rf tmp w
+    run_job $CMSBUILD --architecture=$SCRAM_ARCH --cfg=./cmsbuild.cfg --cmsdist=$CMSDIST --work-dir=w
+    wait % || { echo "BUILD: project $PROJ failed to build."; exit 2; }
 
+    update_status $REPO $PROJ ||
+    	{ echo "BUILD: project $PROJ produced no new RPMs. Skipping."; exit 2; }
+	
     # Creates the cmsBuild upload configuration file
     sed s/#//g cmsbuild.cfg > cmsupload.cfg
 
     # Now does the upload and update at once
     run_job job_upload $REPO $PROJ
-    wait % || { echo "BUILD: failed to upload $PROJ to repo $REPO"; exit 4; }
+    wait % || { echo "BUILD: failed to upload $PROJ to repo $REPO"; exit 2; }
 
-    echo "$DEVTAG $PROJ_LIST" > $CACHE/$PROJ.$REPO.buildentry
-    exit 0; # Build successfull
+    exit 0
 }
 
 # The worst case is when the packages get uploaded
@@ -124,7 +215,7 @@ job_upload() {
     cd $BUILDS/$PROJ
     
     # First uploads to the repository
-    $CMSBUILD --architecture=$SCRAM_ARCH --cfg=./cmsupload.cfg --work-dir=w ||
+    $CMSBUILD --architecture=$SCRAM_ARCH --cfg=./cmsupload.cfg --cmsdist=CMSDIST.$REPO --work-dir=w ||
        { echo "UPLOAD: project $PROJ failed to upload.";  exit 1; }
 
     exit 0 # upload succeeded
@@ -147,7 +238,7 @@ update_status() {
 
     # Creates a new tag
     local TAG="builder_$(date +%Y-%m-%d_%H-%M-%S)_${PROJ}"
-    cvs tag -F $TAG CMSDIST
+    cvs tag -F $TAG CMSDIST.$REPO
 
     # Prepares the status information
     local DATE=$(date)
@@ -171,7 +262,7 @@ create_buildcfg() {
 assumeYes: True
 onlyOnce: True
 testTag: False
-trace: True
+trace: False
 tag: cmp
 repository: $REPO
 [bootstrap]
@@ -193,12 +284,12 @@ acquire_lock() {
 
     # Creates the working area (this works as a lock -- will avoid
     # runnning if there is evidence of another running instance)
-    echo "Trying to acquire lock $BUILDS/$PROJ ..."
-    mkdir "$BUILDS/$PROJ" &> /dev/null &&
-       { echo "Got the lock $BUILDS/$PROJ"; return 0; }
+    echo "Trying to acquire $BUILDS/$PROJ/lock ..."
+    mkdir "$BUILDS/$PROJ/lock" &> /dev/null &&
+       { echo "Got $BUILDS/$PROJ/lock"; return 0; }
 
     # Now tries to recover it
-    local LAST_CHANGE=$(stat -c %Z $BUILDS/$PROJ)
+    local LAST_CHANGE=$(stat -c %Z $BUILDS/$PROJ/lock)
     # Here we should remove the lock and clean stuff in case
     # the lock's age is bigger than the watchdog timeout
     if [ $(($(date +%s) - $TIMEOUT - 5)) -gt $LAST_CHANGE ]; then
@@ -207,17 +298,17 @@ acquire_lock() {
         # This would happen if two concurrent processes try recover it
         # at the same time.
 	release_lock $PROJ
-	mkdir "$BUILDS/$PROJ" &> /dev/null &&
-	   { echo "Got the lock $BUILDS/$PROJ"; return 0; }
+	mkdir "$BUILDS/$PROJ/lock" &> /dev/null &&
+	   { echo "Got $BUILDS/$PROJ/lock"; return 0; }
     fi
 
-    echo "Could not get the lock $BUILDS/$PROJ"
+    echo "Could not get $BUILDS/$PROJ/lock"
     return 1 # could not get the lock
 }
 
 release_lock() {
     local PROJ=$1
-    echo "Cleanning $BUILDS/$PROJ"
+    echo "Cleanning $BUILDS/$PROJ/lock"
     [ -n "$BUILDS" -a -n "$PROJ" ] &&
-       rm -rf "$BUILDS/$PROJ"
+       rmdir "$BUILDS/$PROJ/lock"
 }
