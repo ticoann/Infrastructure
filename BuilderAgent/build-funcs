@@ -202,13 +202,13 @@ update_status() {
     cvs tag -F $TAG CMSDIST.$REPO
 
     # Prepares the status information
-    local DATE=$(date)
-    local DIFF="_not yet available_"
+    local DATE=$(date +"%Y-%m-%d %H:%M:%S %z %a")
+    local DIFF="-"
 
     # Updates the status pages
     for RPM in $RPMS; do
 	local PKG=$(echo $RPM|cut -d"+" -f2)
-	local ENTRY="|  $PKG  |  $RPM  |  $DATE  |  $DIFF  |  $TAG  |"
+	local ENTRY="| $PKG  | $RPM  | $DATE  | $DIFF  | $TAG  |"
 	echo "$ENTRY" >> $WEB/$PKG.$REPO.history
 	echo -n "$ENTRY" > $WEB/$PKG.$REPO
     done
