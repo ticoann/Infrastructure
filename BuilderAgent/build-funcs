@@ -231,8 +231,8 @@ priority: -30
 doNotBootstrap: True
 repositoryDir: $REPO
 [build $1]
-compilingProcesses: 6
-workersPoolSize: 2
+compilingProcesses: 10
+workersPoolSize: 5
 priority: -20
 #[upload $1]
 #priority: 100
