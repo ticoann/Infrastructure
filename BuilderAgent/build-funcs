@@ -33,7 +33,8 @@ job_process_file() {
 
     echo "---------[$FILE]----------"
     cd $BUILDER_ROOT/var
-    cvs co -d CMSDIST.HEAD CMSDIST ||
+    [ -d CMSDIST.HEAD ] || cvs co -d CMSDIST.HEAD CMSDIST
+    cvs up -A CMSDIST.HEAD ||
         { echo "Could not fetch CMSDIST. Skipping it."; exit 1; }
 
     # Get rid of comment lines and changes newlines to # to avoid regex headaches
