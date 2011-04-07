@@ -115,21 +115,20 @@ job_build() {
     trap 'def_job_exit_trap; release_lock $PROJ' EXIT
 
 
-    local REBUILD=1
+    local DIRSUM=$(cat $CMSDIST/* 2>/dev/null | md5sum | tr -d ' -')
+
     if [ ! -d "$CMSDIST" ]; then
 	cvs -Q co -r $BASETAG -d $CMSDIST CMSDIST ||
 	    { echo "Error while getting files from CVS"; exit 1; }
-	REBUILD=0
     elif [ "$(cat $CMSDIST/CVS/Tag |cut -b2-)" != "$BASETAG" ]; then
-	#cvs -Q diff -N -r $BASETAG $CMSDIST || REBUILD=0
 	cvs -Q up -r $BASETAG $CMSDIST || 
 	    { echo "Error while getting files from CVS"; exit 1; }
-	REBUILD=0
     fi
-    process_delta $CMSDIST $@ && REBUILD=0
-    [ $REBUILD = 0 ] ||
-        { echo "Nothing changed. Build not necessary"; exit 1; };
 
+    process_delta $CMSDIST $@ ||
+        { echo "Failed to process deltas."; exit 1; }
+    [ "$DIRSUM" = "$(cat $CMSDIST/* 2>/dev/null | md5sum | tr -d ' -')" ] &&
+        { echo "Nothing changed. Build not necessary"; exit 1; }
 
     echo "Rebuilding project $PROJ. See logfile $LOG_FILE.$PROJ.$REPO"
 
