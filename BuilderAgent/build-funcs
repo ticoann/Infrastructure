@@ -25,7 +25,6 @@ GLOB='([\*\{\}\?\^\!\.\,a-zA-Z0-9_\-]|\]?|\[?)+'
 BTAG='HG[0-9]{4}[a-zA-Z0-9]+'
 DELTA="[ \#]+\+ ?$NAME(\/$NAME|\/\*)?( $GLOB)+"
 NEWENTRY="(^|\#)$BTAG $NAME($DELTA)* *($|\#)"
-OLDENTRY="(^|\#)$NAME( $NAME)+ *($|\#)"
 
 job_process_file() {
     init_job
@@ -41,7 +40,7 @@ job_process_file() {
     while read -d "#" ENTRY; do
 	echo " * Found entry <$ENTRY>"
 	run_job job_build $REPO $ENTRY
-    done <<< $(grep -v "#" CMSDIST.HEAD/$FILE | tr -s " \n" " #" | egrep -o "$NEWENTRY|$OLDENTRY" | tr "#\n" " #")
+    done <<< $(grep -v "#" CMSDIST.HEAD/$FILE | tr -s " \n" " #" | egrep -o "$NEWENTRY" | tr "#\n" " #")
 
     wait;
     cat $LOG_FILE.*.$REPO.chk 2>/dev/null; echo;
@@ -110,19 +109,7 @@ job_build() {
     init_job
     local REPO=$1; shift;
     local CMSDIST="CMSDIST.$REPO"
-    local EFMT=0
-    
-    if [[ "$@" =~ "$NEWENTRY" ]]; then
-	# This is the new entry format (with deltas)
-	local BASETAG=$1; local PROJ=$2; shift 2;
-    else
-	# This is the old entry format (before accepting deltas)
-	local BASETAG="HG1009c"
-	[ "$1" = "$BASETAG" ] && shift;
-	local DEVTAG=$1; local PROJ=$2; shift 2;
-	local PROJ_LIST="$PROJ $@"; PROJ_LIST=${PROJ_LIST% }
-	[[ "$DEVTAG" =~ "builder_" ]] && EFMT=1 || EFMT=2
-    fi
+    local BASETAG=$1; local PROJ=$2; shift 2;
 
     exec &> $LOG_FILE.$PROJ.$REPO.chk  # Set new log file
 
@@ -132,48 +119,22 @@ job_build() {
 	{ echo "Project $PROJ locked by other process. Skipping."; exit 1; }
     trap 'def_job_exit_trap; release_lock $PROJ' EXIT
 
-    case $EFMT in
-      1 ) # old (comp only) entry format
-	[ "$REPO" = "comp" ] ||
-	    { echo "Entry syntax not allowed on pre-releases"; exit 1; }
-	if [ -d "$CMSDIST" ]; then
-	    cvs diff -N -r $DEVTAG $CMSDIST &&
-		{ echo "Nothing changed. Build not necessary"; exit 1; }
-	    cvs up -r $DEVTAG $CMSDIST ||
-		{ echo "Error while getting files from CVS"; exit 1; }
-	else
-	    cvs co -r $DEVTAG -d $CMSDIST CMSDIST ||
-		{ echo "Error while getting files from CVS"; exit 1; }
-	fi
-	;;
-      2 ) # old entry format
-	# Creates a CMSDIST based on the developer tag
-	rm -rf $CMSDIST.old CMSDIST.base
-	mv $CMSDIST $CMSDIST.old 2> /dev/null || mkdir $CMSDIST.old
-	run_job $TAGBUILDER $BASETAG $DEVTAG $PROJ_LIST
-	wait % || { echo "Could not prepare a tag for project $PROJ" ; exit 1; }
-	mv CMSDIST $CMSDIST
-	diff $CMSDIST $CMSDIST.old &&
-	   { echo "Nothing changed. Build not necessary"; exit 1; }
-	;;
-      * )
-	# This is new entry format
-	local REBUILD=1
-	if [ ! -d "$CMSDIST" ]; then
-	    cvs -Q co -r $BASETAG -d $CMSDIST CMSDIST ||
-		{ echo "Error while getting files from CVS"; exit 1; }
-	    REBUILD=0
-	elif [ "$(cat $CMSDIST/CVS/Tag |cut -b2-)" != "$BASETAG" ]; then
-	    #cvs -Q diff -N -r $BASETAG $CMSDIST || REBUILD=0
-	    cvs -Q up -r $BASETAG $CMSDIST || 
-		{ echo "Error while getting files from CVS"; exit 1; }
-	    REBUILD=0
-	fi
-	process_delta $CMSDIST $@ && REBUILD=0
-	[ $REBUILD = 0 ] ||
-	    { echo "Nothing changed. Build not necessary"; exit 1; };
-	;;
-    esac
+
+    local REBUILD=1
+    if [ ! -d "$CMSDIST" ]; then
+	cvs -Q co -r $BASETAG -d $CMSDIST CMSDIST ||
+	    { echo "Error while getting files from CVS"; exit 1; }
+	REBUILD=0
+    elif [ "$(cat $CMSDIST/CVS/Tag |cut -b2-)" != "$BASETAG" ]; then
+	#cvs -Q diff -N -r $BASETAG $CMSDIST || REBUILD=0
+	cvs -Q up -r $BASETAG $CMSDIST || 
+	    { echo "Error while getting files from CVS"; exit 1; }
+	REBUILD=0
+    fi
+    process_delta $CMSDIST $@ && REBUILD=0
+    [ $REBUILD = 0 ] ||
+        { echo "Nothing changed. Build not necessary"; exit 1; };
+
 
     echo "Rebuilding project $PROJ. See logfile $LOG_FILE.$PROJ.$REPO"
 
