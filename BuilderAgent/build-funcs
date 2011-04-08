@@ -135,20 +135,15 @@ job_build() {
 
     exec &> $LOG_FILE.$PROJ.$REPO  # Set new log file
 
-    # Creates a cmsBuild configuration file
-    create_buildcfg $PROJ $REPO > cmsbuild.cfg
-    
     # Builds it
     [ -d "tmp" -o -d "w" ] && rm -rf tmp w
-    run_job $CMSBUILD --architecture=$SCRAM_ARCH --cfg=./cmsbuild.cfg --cmsdist=$CMSDIST --work-dir=w
+    run_job $CMSBUILD -a $SCRAM_ARCH -c $CMSDIST -j 5 --builders=10 \
+                      --repository=$REPO build $PROJ --work-dir=w
     wait % || { echo "BUILD: project $PROJ failed to build."; exit 2; }
 
     update_status $REPO $PROJ ||
     	{ echo "BUILD: project $PROJ produced no new RPMs. Skipping."; exit 2; }
 	
-    # Creates the cmsBuild upload configuration file
-    sed s/#//g cmsbuild.cfg > cmsupload.cfg
-
     # Now does the upload and update at once
     run_job job_upload $REPO $PROJ
     wait % || { echo "BUILD: failed to upload $PROJ to repo $REPO"; exit 2; }
@@ -169,9 +164,9 @@ job_upload() {
     local REPO=$1; local PROJ=$2;
 
     cd $BUILDS/$PROJ
-    
-    # First uploads to the repository
-    $CMSBUILD --architecture=$SCRAM_ARCH --cfg=./cmsupload.cfg --cmsdist=CMSDIST.$REPO --work-dir=w ||
+
+    $CMSBUILD --sync-back -a $SCRAM_ARCH -c CMSDIST.$REPO -j 5 --builders=10 \
+              --repository=$REPO upload $PROJ --work-dir=w ||
        { echo "UPLOAD: project $PROJ failed to upload.";  exit 1; }
 
     exit 0 # upload succeeded
@@ -209,30 +204,6 @@ update_status() {
     done
 
     return 0
-}
-
-create_buildcfg() {
-    local PROJ=$1; local REPO=${2:-comp.pre}; # REPO=comp or REPO=comp.pre
-    cat << EOF_CFG
-[globals]
-assumeYes: True
-onlyOnce: True
-testTag: False
-trace: False
-tag: cmp
-repository: $REPO
-[bootstrap]
-priority: -30
-doNotBootstrap: True
-repositoryDir: $REPO
-[build $1]
-compilingProcesses: 10
-workersPoolSize: 5
-priority: -20
-#[upload $1]
-#priority: 100
-#syncBack: True
-EOF_CFG
 }
 
 acquire_lock() {
