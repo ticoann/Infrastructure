@@ -166,7 +166,7 @@ class GitInterface:
         self.stg_version, self.git_version = self._version()
         self.basedir = self._basedir()
 
-    def _run(self, cmd, cwd=None):
+    def _run(self, cmd, cwd=None, allowed_codes=[0]):
         "Use subprocess to run a command, and return the stdout. Raise an exception for returncode != 0."
         proc = subprocess.Popen([cmd], shell=True,
                                 stdout=subprocess.PIPE,
@@ -174,12 +174,14 @@ class GitInterface:
                                 cwd=cwd)
         stdout, stderr = proc.communicate()
         rc = proc.returncode
-        if rc != 0:
+        if rc not in allowed_codes:
             self.logger.critical("Non-zero return code (%d) from command: %s",
                                  rc, ' '.join(cmd))
             self.logger.critical("STDOUT was: %s", stdout)
             self.logger.critical("STDERR was: %s", stderr)
-            raise Exception("Subprocess Error")
+            e = Exception("Subprocess Error")
+            setattr(e, 'rc', rc)
+            raise e
 
         return stdout
 
@@ -215,8 +217,9 @@ class GitInterface:
         return self.basedir.split('/')[-1]
 
     def check_file_status(self):
-        stdout = self._run('stg status|grep ?').strip().split('\n')
-        if len(stdout) > 0:
+        stdout = self._run('stg status|grep ?', allowed_codes=[0,1])
+        stdout = stdout.strip().split('\n')
+        if "\n".join(stdout):
             print "The following files are not known to stg:"
             print "\n".join(stdout)
             check = raw_input('continue? [y/N]')
