@@ -349,7 +349,7 @@ if __name__ == '__main__':
         if not options.ticket:
             logger.info("Creating new ticket")
             options.ticket = server.ticket.create(options.summary, options.message, attributes, True)
-            logger.warning("Created ticket #%s" % options.ticket)
+            logger.info("Created ticket #%s" % options.ticket)
 
         logger.debug("Attaching patch to ticket")
         assert options.ticket == server.ticket.get(options.ticket)[0], 'ticket %s not known' % options.ticket
