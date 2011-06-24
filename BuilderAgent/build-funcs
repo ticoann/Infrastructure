@@ -106,10 +106,14 @@ job_build() {
     local REPO=$1; shift;
     local CMSDIST="CMSDIST.$REPO"
     local BASETAG=$1; local PROJ=$2; shift 2;
+    local CMSBUILD=$CMSBUILD17
+    case $BASETAG in
+      HG12* | HG111* | HG110[789]* ) CMSBUILD=$CMSBUILD18 ;;
+    esac
 
     exec &> $LOG_FILE.$PROJ.$REPO.chk  # Set new log file
 
-    echo; echo "---------[$BASETAG $PROJ]----------"
+    echo; echo "---------[$BASETAG $PROJ $CMSBUILD]----------"
     mkdir -p $BUILDS/$PROJ; cd $BUILDS/$PROJ
     acquire_lock $PROJ ||
 	{ echo "Project $PROJ locked by other process. Skipping."; exit 1; }
@@ -147,7 +151,7 @@ job_build() {
     	{ echo "BUILD: project $PROJ produced no new RPMs. Skipping."; exit 2; }
 
     # Now uploads the RPMs
-    run_job job_upload $REPO $PROJ
+    run_job job_upload $REPO $PROJ $CMSBUILD
     wait % || { echo "BUILD: failed to upload $PROJ to repo $REPO"; exit 2; }
 
     # Publishes the new RPMs and tags CMSDIST
@@ -164,7 +168,7 @@ job_upload() {
     init_job
     trap '' EXIT # there is nothing to clean here
     trap 'echo "UPLOAD: cannot TERM while uploading $PROJ"' SIGINT SIGTERM
-    local REPO=$1; local PROJ=$2;
+    local REPO=$1; local PROJ=$2; local CMSBUILD=$3
 
     cd $BUILDS/$PROJ
 
