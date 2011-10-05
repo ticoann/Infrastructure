@@ -32,7 +32,7 @@ job_process_file() {
     local FILE="${REPO/%comp/comp.}releases"
 
     echo "---------[$FILE]----------"
-    cd $BUILDER_ROOT/var
+    cd $STATE
     [ -d CMSDIST.HEAD ] || cvs co -d CMSDIST.HEAD CMSDIST
     cvs up -A CMSDIST.HEAD ||
         { echo "Could not fetch CMSDIST. Skipping it."; exit 1; }
@@ -69,7 +69,7 @@ process_delta() {
 	    # $1 is the glob pattern to look for files in CMSDIST HEAD
 	    # The 'eval echo' below is needed because brace expansion gets
 	    # done before variable expansion.
-	    for F in $(eval echo $BUILDER_ROOT/var/CMSDIST.HEAD/$1); do
+	    for F in $(eval echo $STATE/CMSDIST.HEAD/$1); do
 		test -f "$F" || 
                     { echo "Pattern $1 doesnt expand to any existent file"; return 1; }
 

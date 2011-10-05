@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CFGFILE="/build/diego/builder/sw/config"
+CFGFILE="/build/dmwmbld/sw/current/config"
 source $CFGFILE
 LOG_FILES="$BUILDER_ROOT/logs/*-*-*_*-*-*"
 

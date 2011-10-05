@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CFGFILE="/build/diego/builder/sw/config"
+CFGFILE="/build/dmwmbld/sw/current/config"
 source $CFGFILE
 
 [ -n "$*" ]  && AGE=$(date --date="$*" +%s 2> /dev/null)

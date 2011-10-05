@@ -47,7 +47,7 @@
 #
 # Global configuration
 #
-CFGFILE="/build/diego/builder/sw/config"
+CFGFILE="/build/dmwmbld/sw/current/config"
 source $CFGFILE
 #
 # End of config
