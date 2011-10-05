@@ -20,6 +20,14 @@ run_job() {
     MYCHLD+=" $!" # add the child pid to the children list
 }
 
+# Deal with differences to osx
+echo_e=-e
+case $(uname) in Darwin )
+  md5sum() { md5 -r ${1+"$@"}; }
+  echo_e=
+  ;;
+esac
+
 NAME='[.a-zA-Z0-9_\-]+'
 GLOB='([\*\{\}\?\^\!\.\,a-zA-Z0-9_\-]|\]?|\[?)+'
 BTAG='HG[0-9]{4}[-a-zA-Z0-9]+'
