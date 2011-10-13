@@ -22,9 +22,11 @@ run_job() {
 
 # Deal with differences to osx
 echo_e=-e
+statfmt="-c %Z"
 case $(uname) in Darwin )
   md5sum() { md5 -r ${1+"$@"}; }
   echo_e=
+  statfmt="-f %c"
   ;;
 esac
 
@@ -226,7 +228,7 @@ acquire_lock() {
        { echo "Got $BUILDS/$PROJ/lock"; return 0; }
 
     # Now tries to recover it
-    local LAST_CHANGE=$(stat -c %Z $BUILDS/$PROJ/lock)
+    local LAST_CHANGE=$(stat $statfmt $BUILDS/$PROJ/lock)
     # Here we should remove the lock and clean stuff in case
     # the lock's age is bigger than the watchdog timeout
     if [ $(($(date +%s) - $TIMEOUT - 5)) -gt $LAST_CHANGE ]; then
