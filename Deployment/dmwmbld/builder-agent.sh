@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # This script needs to run with a valid Kerberos Token (i.e acron job)
-# 
+#
 # Why auto-killing ?
 # - It uses cmsBuild and other tools that may hang in many different ways.
 # - If the process is stuck for a long time, it is very improbable it will
@@ -82,7 +82,7 @@ main_exit_trap() {
 
 main_term_trap() {
     echo "MAIN: SIGTERM to $MAIN_JOBS"
-    kill -SIGTERM 0 &> /dev/null 
+    kill -SIGTERM 0 &> /dev/null
     echo "MAIN: waiting for $MAIN_JOBS"
     wait $MAIN_JOBS &> /dev/null
     kill -SIGKILL $WATCHDOG &> /dev/null

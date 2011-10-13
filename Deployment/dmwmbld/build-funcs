@@ -5,7 +5,7 @@ def_job_term_trap() {
     kill -SIGTERM $MYCHLD &>/dev/null
 
     # Explicitly exits, thus avoiding continuing from where the trap occured.
-    # Will not call the EXIT trap if it was there when TERM was received. 
+    # Will not call the EXIT trap if it was there when TERM was received.
     exit 1
 }
 
@@ -64,7 +64,7 @@ job_process_file() {
 process_delta() {
     local CMSDIST=$1; shift;
 
-    set -B # Enables brace expansion (disabled by default when running scripts) 
+    set -B # Enables brace expansion (disabled by default when running scripts)
 
     # This loop process each delta
     while [ "$1" = "+" ]; do
@@ -80,7 +80,7 @@ process_delta() {
 	    # The 'eval echo' below is needed because brace expansion gets
 	    # done before variable expansion.
 	    for F in $(eval echo $STATE/CMSDIST.HEAD/$1); do
-		test -f "$F" || 
+		test -f "$F" ||
                     { echo "Pattern $1 doesnt expand to any existent file"; return 1; }
 
 		local FNAME=${F##*/} # takes the file name without full path
@@ -103,7 +103,7 @@ process_delta() {
 
 		FVER=$(head -n1 $CMSDIST/$FNAME| tr -s " " | cut -d" " -f5 2>/dev/null)
                 [ "$VER" != "*" -a "$VER" != "$FVER" ] &&
-  		   { echo "Could not match $VER for file $FNAME"; return 1; }
+                   { echo "Could not match $VER for file $FNAME"; return 1; }
 	    done
 	    shift
 	done
@@ -136,7 +136,7 @@ job_build() {
 	cvs -Q co -r $BASETAG -d $CMSDIST CMSDIST ||
 	    { echo "Error while getting files from CVS"; exit 1; }
     elif [ "$(cat $CMSDIST/CVS/Tag |cut -b2-)" != "$BASETAG" ]; then
-	cvs -Q up -r $BASETAG $CMSDIST || 
+	cvs -Q up -r $BASETAG $CMSDIST ||
 	    { echo "Error while getting files from CVS"; exit 1; }
     fi
 
@@ -233,7 +233,7 @@ acquire_lock() {
     # Here we should remove the lock and clean stuff in case
     # the lock's age is bigger than the watchdog timeout
     if [ $(($(date +%s) - $TIMEOUT - 5)) -gt $LAST_CHANGE ]; then
-        # There is a small chance, though, that another process 
+        # There is a small chance, though, that another process
         # has just released and created it again... **Should fix it**
         # This would happen if two concurrent processes try recover it
         # at the same time.
