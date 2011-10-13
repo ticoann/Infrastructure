@@ -10,3 +10,4 @@ BUILDS="$STATE/BUILDS"
 TIMEOUT=21600 # timeout in seconds (6 hours)
 LOG_FILE="$BUILDER_ROOT/logs/$(date +%Y-%m-%d_%H-%M-%S)"
 export CVSROOT=":gserver:cmscvs.cern.ch:/cvs_server/repositories/CMSSW"
+ISDEV=true

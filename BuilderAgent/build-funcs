@@ -179,10 +179,11 @@ job_upload() {
     trap '' EXIT # there is nothing to clean here
     trap 'echo "UPLOAD: cannot TERM while uploading $PROJ@$ARCH"' SIGINT SIGTERM
     local REPO=$1; local PROJ=$2; local CMSBUILD=$3; local ARCH=$4
+    local SYNC="--sync-back"; $ISDEV && SYNC=""
 
     cd $BUILDS/${PROJ}_${ARCH}
 
-    $CMSBUILD --sync-back -a $ARCH -c CMSDIST.$REPO -j 5 --builders=10 \
+    $CMSBUILD $SYNC -a $ARCH -c CMSDIST.$REPO -j 5 --builders=10 \
               --repository=$REPO upload $PROJ --work-dir=w ||
        { echo "UPLOAD: project $PROJ@$ARCH failed to upload.";  exit 1; }
 
@@ -201,7 +202,7 @@ update_status() {
 
     # Creates a new tag
     local TAG="bld_$(date +%s)_${PROJ}_${ARCH}"
-    cvs tag -F $TAG CMSDIST.$REPO
+    $ISDEV || cvs tag -F $TAG CMSDIST.$REPO
 
     # Prepares the status information
     local DATE=$(date +"%Y-%m-%d %H:%M:%S %z %a")
